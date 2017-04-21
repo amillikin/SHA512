@@ -1,7 +1,8 @@
 /********************************************************************************************
 *										SHA512.cpp 											*
 *																							*
-*	DESCRIPTION: A SHA2-512 Hash Program.													*
+*	DESCRIPTION: A SHA-512 Hash Program.													*
+*				 Takes a file and produces the respective SHA-512 Hash Value.				*
 *				 Input Parameters: SHA512 <infile>											*
 *																							*
 *																							*
@@ -22,6 +23,21 @@
 using namespace std;
 typedef unsigned long long ull;
 ifstream inFile;
+
+struct hashStruct {
+	ull messageBlock[16];
+	ull w[80];
+	ull a;
+	ull b;
+	ull c;
+	ull d;
+	ull e;
+	ull f;
+	ull g;
+	ull h;
+	ull mixer1;
+	ull mixer2;
+};
 
 // Initial Hash Values
 static const ull initHashVals[8]{
@@ -49,47 +65,154 @@ static const ull roundConst[80]{
 	0x431d67c49c100d4c, 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817
 };
 
-//Creates necessary hex bytes to and with buffer that should contain less than 8 bytes
-ull getHexfBytes(size_t bytesLeft) {
-	ull hexBytes = 0;
-	for (size_t i = 0; i < bytesLeft; i++) {
-		hexBytes <<= 8;
-		hexBytes |= 0xff;
+// Creates necessary hex bytes to and with buffer that should contain less than 8 bytes
+ull getMask(size_t maskAmt) {
+	ull mask = 0;
+	for (size_t i = 0; i < maskAmt; i++) {
+		mask <<= 8;
+		mask |= 0xff;
 	}
-	return hexBytes;
+	return mask;
 }
 
-//Creates Random Pad Bits
-ull getRandBits(int numToPad) {
-	ull randBytes = 0;
-	srand((unsigned int)time(NULL));
-	for (int i = 0; i < numToPad; i++) {
-		randBytes <<= 8;
-		randBytes |= (rand() % 255);
-	};
-	return randBytes;
+// Right Rotate
+ull rr(ull rotWord, int rotAmt) {
+	return ((rotWord & getMask(rotAmt)) << rotAmt) || (rotWord >> rotAmt);
 }
 
-//Converts a string to all uppercase characters - ARM
-string upCase(string str) {
-	transform(str.begin(), str.end(), str.begin(), toupper);
-	return str;
+// Right Shift
+ull rs(ull shiftWord, int shiftAmt) {
+	return shiftWord >> shiftAmt;
+}
+
+// Majority
+ull maj(ull a, ull b, ull c) {
+	return (a & b) ^ (a & c) ^ (b & c);
+}
+
+// Conditional
+ull cond(ull e, ull f, ull g) {
+	return (e & f) ^ (~e & g);
+}
+
+// Rotates A for use in determining mixer1
+ull rotA(ull a) {
+	return rr(a, 28) ^ rr(a, 34) ^ rr(a, 39);
+}
+
+// Rotate E for use in determining mixer2
+ull rotE(ull e) {
+	return rr(e, 14) ^ rr(e, 18) ^ rr(e, 41);
+}
+
+// Copies message block into word array, 
+// then fills the remainder of the array with the calculated value
+hashStruct fillWordArray(hashStruct block) {
+	for (int i = 0; i < 16; i++) {
+		block.w[i] = _byteswap_uint64(block.messageBlock[i]);
+	}
+	for (int i = 16; i < 80; i++) {
+		block.w[i] = block.w[i - 16] + (rr(block.w[i - 15], 1) ^ rr(block.w[i - 15], 8) ^ rs(block.w[i - 15], 7))
+			+ block.w[i - 7] + (rr(block.w[i - 2], 19) ^ rr(block.w[i - 2], 61) ^ rs(block.w[i - 2], 6));
+	}
+	return block;
+}
+
+// Organizes the hash steps that take place each of the 80 rounds
+hashStruct hashCompression(hashStruct block) {
+	block = fillWordArray(block);
+
+	for (int i = 0; i < 80; i++) {
+		block.mixer1 = maj(block.a, block.b, block.c) + rotA(block.a);
+		block.mixer2 = block.h + cond(block.e, block.f, block.g) + rotE(block.e)
+					+ block.w[i] + roundConst[i];
+		block.h = block.g;
+		block.g = block.f;
+		block.f = block.e;
+		block.e = block.d + block.mixer2;
+		block.d = block.c;
+		block.c = block.b;
+		block.b = block.a;
+		block.a = block.mixer1 + block.mixer2;
+	}
+	return block;
+}
+
+//Writes a state to the outfile
+void writeHash(hashStruct block) {
+	cout << hex;
+	cout << block.a << " ";
+	cout << block.b << " ";
+	cout << block.c << " ";
+	cout << block.d << " ";
+	cout << block.e << " ";
+	cout << block.f << " ";
+	cout << block.g << " ";
+	cout << block.h << " ";
+}
+
+// Read remaining bytes and pad accordingly.
+// If no remaining bytes, final messageBlock sets first bit to 1, 
+// followed by all 0s until the last word which is the filesize
+hashStruct padBlock(hashStruct block, ull fileSize, int bytesLeft) {
+	if (bytesLeft > 0) {
+		// File will contain only full bytes, so we need at least 8 bytes for file length
+		// and then 1 byte for appending 0x80.
+		// If there are left over bytes, but less than the 9 required,
+		// We will pad this last message block with 0x80 and 0x0 until full 128 bytes
+		// Then create one final block of 0x0 and the final word being the file length
+		// Else we can just append 0x80 where the file ends, 
+		// set the last word to file length, and fill between with 0x0
+		inFile.read(reinterpret_cast<char*>(&block.messageBlock), sizeof(block.messageBlock)-bytesLeft);
+		int padStart = ((128 - bytesLeft) / 16);
+		int shiftAmt = ((128 - bytesLeft) % 16);
+
+		if (bytesLeft < 9) {
+			block.messageBlock[padStart] ^= (0x80 << (shiftAmt - 1));
+			for (int i = (padStart + 1); i < 16; i++) {
+				block.messageBlock[i] = 0x0;
+			}
+			block = hashCompression(block);
+
+			for (int i = 0; i < 15; i++) {
+				block.messageBlock[i] = 0x0;
+			}
+			block.messageBlock[15] = fileSize;
+			block = hashCompression(block);
+		}
+		else {
+			block.messageBlock[padStart] ^= (0x80 << (shiftAmt - 1));
+			for (int i = (padStart + 1); i < 15; i++) {
+				block.messageBlock[i] = 0x0;
+			}
+			block.messageBlock[15] = fileSize;
+			block = hashCompression(block);
+		}
+	}
+	else {
+		block.messageBlock[0] = 0x8000000000000000;
+		for (int i = 1; i < 15; i++) {
+			block.messageBlock[i] = 0x0;
+		}
+		block.messageBlock[15] = fileSize;
+		block = hashCompression(block);
+	}
+	return block;
 }
 
 void prompt()
 {
-	cout << "Welcome to Aaron's SHA2-512 Hash!" << endl;
-	cout << "Accepted input: AES <-action> <key> <mode> <infile> <outfile>" << endl;
+	cout << "Welcome to Aaron's SHA-512 Hash!" << endl;
+	cout << "Accepted input: SHA512 <infile>" << endl;
 }
 
 int main(int argc, char* argv[]) {
 	clock_t startTime = clock(), endTime;
 	double secondsElapsed;
-	string action, mode, keyStr, keyByte;
 	streampos begF, endF;
-	int bytesLeft = 0, readCnt = 0;
-	unsigned int byte, fileSize, readSize;
-	ull block;
+	int bytesLeft = 0;
+	ull fileSize = 0, readSize = 0, readCnt = 0;
+	hashStruct block;
 	streampos begin, end;
 
 	if (argc != 2) {
@@ -98,7 +221,7 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	inFile.open(argv[2], ios::in | ios::binary);
+	inFile.open(argv[1], ios::in | ios::binary);
 	if (!inFile) {
 		cout << "Can't open input file " << argv[4] << endl;
 		prompt();
@@ -112,84 +235,37 @@ int main(int argc, char* argv[]) {
 	fileSize = (end - begin);
 	inFile.seekg(0, ios::beg);
 
+	bytesLeft = (fileSize % 128) ;
+	readCnt = fileSize / 128;
 
-	//	Filesize limit of 31 bits. - ARM
-	if (fileSize > 2147483647) {
-		cout << "File is too large to open. Must be <= 31 bits of data." << endl;
-		prompt();
-		return 1;
-	}
-
-		bytesLeft = fileSize % 16;
-		readCnt = fileSize / 16;
-	}
-	
-	};
-
-
-	// If filesize is less than 8 bytes, only read that amount, padding appropriately before passing through DES.
-	// Guaranteed to be encrpytion if this is true because an encrypted file being decrypted would have at least 9 bytes.
-	if (fileSize < 16) {
-		state = readState(true, bytesLeft);
-		if (mode == "CBC") {
-			state = xorState(state, iv);
-		}
-		state = aes(state, action);
-	}
+	// Sets initial hash digest values
+	block.a = initHashVals[0];
+	block.b = initHashVals[1];
+	block.c = initHashVals[2];
+	block.d = initHashVals[3];
+	block.e = initHashVals[4];
+	block.f = initHashVals[5];
+	block.g = initHashVals[6];
+	block.h = initHashVals[7];
 
 	// Read file for duration of count determined earlier (amount of full 128-bit blocks available)
 	// pass through AES, write to outFile.
 	while (readCnt > 0) {
 		readCnt--;
-		state = readState(false);
-
-		//If CBC and Encrypting, XOR block with iv
-		//If CBC and Decrypting, save ciphertext block for next iv in tempIV
-		if (mode == "CBC" && action == "E") {
-			state = xorState(state, iv);
-		}
-		else if (mode == "CBC" && action == "D") {
-			tempIV = state;
-		}
-		state = aes(state, action);
-
-		//If CBC and Encrypting, set next iv to ciphertext state
-		//If CBC and Decrypting, XOR state with iv, set next iv from tempIV
-		if (mode == "CBC" && action == "D") {
-			state = xorState(state, iv);
-			iv = tempIV;
-		}
-		else if (mode == "CBC" && action == "E") {
-			iv = state;
-		}
-		writeState(state, false);
-	};
-
-	// Read remaining bytes. If encrypting, we append random bits during read to provide a ensure 128-bit state
-	// Write result. If decrypting, only write the correct amount of bytes left, not the extra padding.
-	if (bytesLeft > 0) {
-		if (action == "E") {
-			state = readState(true, bytesLeft);
-			if (mode == "CBC") {
-				state = xorState(state, iv);
-			}
-			state = aes(state, action);
-			writeState(state, false);
-		}
-		else if (action == "D") {
-			state = readState(false);
-			state = aes(state, action);
-			if (mode == "CBC") {
-				state = xorState(state, iv);
-			}
-			writeState(state, true, (16 - bytesLeft));
-		}
+		inFile.read(reinterpret_cast<char*>(&block.messageBlock), sizeof(block.messageBlock));
+		block = hashCompression(block);
 	}
-
+	
+	// Handles the final padding
+	block = padBlock(block, fileSize, bytesLeft);
+	
+	// Writes the hash value to the console
+	writeHash(block);
+	
 	endTime = clock();
 	secondsElapsed = double(endTime - startTime) / CLOCKS_PER_SEC;
 	cout << fixed << setprecision(3);
-	cout << secondsElapsed << " Seconds Elapsed." << endl;
+	cout << "Elapsed Time: " << secondsElapsed << endl;
 
 	return 0;
 }
