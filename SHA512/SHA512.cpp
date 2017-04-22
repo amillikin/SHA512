@@ -185,23 +185,26 @@ void writeHash(hashStruct block) {
 // followed by all 0s until the last word which is the filesize
 hashStruct padBlock(hashStruct block, ull fileSize, int bytesLeft) {
 	if (bytesLeft > 0) {
-		// File will contain only full bytes, so we need at least 8 bytes for file length
-		// and then 1 byte for appending 0x80.
-		// If there are left over bytes, but less than the 9 required,
+		// File will contain only full bytes, so we need at least 16 bytes for file length
+		// and then 1 byte for appending 0x80. We assume upper 8 bytes of file length are 0.
+		// If there are left over bytes, but less than the 17 required,
 		// We will pad this last message block with 0x80 and 0x0 until full 128 bytes
 		// Then create one final block of 0x0 and the final word being the file length
 		// Else we can just append 0x80 where the file ends, 
-		// set the last word to file length, and fill between with 0x0
+		// set the last 8-byte word to file length, and fill between with 0x0
+		for (int i = 0; i < 16; i++) {
+			block.messageBlock[i] = 0x0;
+		}
 		inFile.read(reinterpret_cast<char*>(&block.messageBlock), sizeof(block.messageBlock));
-		int padStart = 7 - ((128 - bytesLeft) / 16);
-		int shiftAmt = (((128 - bytesLeft) % 16)-9)*8;
+		int padStart = bytesLeft / 8;
+		int shiftAmt = (7 - (bytesLeft % 8))*8;
 		ull appendOne = 0x80;
 
 		for (int i = 0; i <= padStart; i++) {
 			block.messageBlock[i] = _byteswap_uint64(block.messageBlock[i]);
 		}
 
-		if ((128 - bytesLeft) < 9) {
+		if ((128 - bytesLeft) < 17) {
 			block.messageBlock[padStart] |= (appendOne << shiftAmt);
 			for (int i = (padStart + 1); i < 16; i++) {
 				block.messageBlock[i] = 0x0;
