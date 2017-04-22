@@ -47,13 +47,13 @@ struct hashStruct {
 	ull mixer2 = 0;
 };
 
-// Initial Hash Values
+// Initial Hash Values for use as the first message digest - ARM
 static const ull initHashVals[8]{
 	0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
 	0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179
 };
 
-// Round constants
+// Round constants used in compression loop - ARM
 static const ull roundConst[80]{
 	0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc, 0x3956c25bf348b538,
 	0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118, 0xd807aa98a3030242, 0x12835b0145706fbe,
@@ -73,38 +73,40 @@ static const ull roundConst[80]{
 	0x431d67c49c100d4c, 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817
 };
 
-// Right Rotate
+// Returns result of right circular rotating rotWord by rotAmt - ARM
 ull rr(ull rotWord, int rotAmt) {
 	return _rotr64(rotWord, rotAmt);
 }
 
-// Right Shift
+// Returns result of right shifting shiftWord by shiftAmt - ARM
 ull rs(ull shiftWord, int shiftAmt) {
 	return __ull_rshift(shiftWord, shiftAmt);
 }
 
-// Majority
+// Majority - ARM
 ull maj(ull a, ull b, ull c) {
 	return ((a & b) ^ (a & c) ^ (b & c));
 }
 
-// Conditional
+// Conditional - ARM
 ull cond(ull e, ull f, ull g) {
 	return ((e & f) ^ (~e & g));
 }
 
-// Rotates A for use in determining mixer1
+// Rotates A for use in determining mixer1 - ARM
 ull rotA(ull a) {
 	return rr(a, 28) ^ rr(a, 34) ^ rr(a, 39);
 }
 
-// Rotate E for use in determining mixer2
+// Rotate E for use in determining mixer2 - ARM
 ull rotE(ull e) {
 	return rr(e, 14) ^ rr(e, 18) ^ rr(e, 41);
 }
 
-// Copies message block into word array, 
-// then fills the remainder of the array with the calculated value
+/*
+	Copies message block into word array, 
+	then fills the remainder of the array with the calculated value - ARM
+*/
 hashStruct fillWordArray(hashStruct block) {
 	block.w[0] = block.messageBlock[0];
 	block.w[1] = block.messageBlock[1];
@@ -129,7 +131,7 @@ hashStruct fillWordArray(hashStruct block) {
 	return block;
 }
 
-// Organizes the hash steps that take place each of the 80 rounds
+// Organizes the hash compression steps that take place each of the 80 rounds - ARM
 hashStruct hashCompression(hashStruct block) {
 	block = fillWordArray(block);
 
@@ -146,7 +148,7 @@ hashStruct hashCompression(hashStruct block) {
 		block.b = block.a;
 		block.a = block.mixer1 + block.mixer2;
 	}
-	// Final adding of last round's digest with initial digest
+	// Final adding of last round's digest with initial digest - ARM
 	block.a = block.a + block.initA;
 	block.b = block.b + block.initB;
 	block.c = block.c + block.initC;
@@ -156,7 +158,7 @@ hashStruct hashCompression(hashStruct block) {
 	block.g = block.g + block.initG;
 	block.h = block.h + block.initH;
 
-	// Saving initial digest values for next round
+	// Saving initial digest values for next round - ARM
 	block.initA = block.a;
 	block.initB = block.b;
 	block.initC = block.c;
@@ -169,7 +171,7 @@ hashStruct hashCompression(hashStruct block) {
 	return block;
 }
 
-//Writes a state to the outfile
+// Writes a state to the outfile  - ARM
 void writeHash(hashStruct block) {
 	cout << hex;
 	cout << fixed << setprecision(16);
@@ -183,20 +185,26 @@ void writeHash(hashStruct block) {
 	cout << block.h << endl;
 }
 
-// Read remaining bytes and pad accordingly.
-// If no remaining bytes, final messageBlock sets first bit to 1, 
-// followed by all 0s until the last word which is the filesize
+/* 
+	Read remaining bytes and pad accordingly.
+	If no remaining bytes, final messageBlock sets first bit to 1, 
+	followed by all 0s until the last word which is the filesize - ARM
+*/
 hashStruct padBlock(hashStruct block, ull fileSize, int bytesLeft) {
 	if (bytesLeft > 0) {
-		// File will contain only full bytes, so we need at least 16 bytes for file length
-		// and then 1 byte for appending 0x80. We assume upper 8 bytes of file length are 0.
-		// If there are left over bytes, but less than the 17 required,
-		// We will pad this last message block with 0x80 and 0x0 until full 128 bytes
-		// Then create one final block of 0x0 and the final word being the file length
-		// Else we can just append 0x80 where the file ends, 
-		// set the last 8-byte word to file length, and fill between with 0x0
+		/*	
+			File will contain only full bytes, so we need at least 16 bytes for file length
+			and then 1 byte for appending 0x80. We assume upper 8 bytes of file length are all 0.
 
-		// Making sure message block is set to 0 before this final read.
+			If there are left over bytes, but less than the 17 required bytes of space to pad,
+			we will pad this last message block with 0x80 and 0x0 until full 128 bytes.
+			Then create one final block of 0x0 and set the final 8-byte word being the file length.
+
+			Otherwise we can just append 0x80 where the file ends, 
+			set the last 8-byte word to file length, and fill between with 0x0 - ARM
+		*/
+		
+		// Making sure message block is set to 0 before this final read.  - ARM
 		fill(&block.messageBlock[0], &block.messageBlock[16], 0);
 
 		inFile.read(reinterpret_cast<char*>(&block.messageBlock), sizeof(block.messageBlock));
@@ -267,10 +275,11 @@ int main(int argc, char* argv[]) {
 	fileSize = (end - begin);
 	inFile.seekg(0, ios::beg);
 
-	bytesLeft = (fileSize % 128) ;
+	// Determines the number of bytes that will be left after the last full read - ARM
+	bytesLeft = (fileSize % 128);
 	readCnt = fileSize / 128;
 
-	// Sets initial hash digest values
+	// Sets initial hash digest values - ARM
 	block.a = initHashVals[0];
 	block.b = initHashVals[1];
 	block.c = initHashVals[2];
@@ -288,8 +297,11 @@ int main(int argc, char* argv[]) {
 	block.initG = initHashVals[6];
 	block.initH = initHashVals[7];
 
-	// Read file for duration of count determined earlier (amount of full 128-bit blocks available)
-	// pass through AES, write to outFile.
+	/*
+		Read file for duration of count determined earlier 
+		(amount of full 1024-bit blocks available)
+		and pass through hashCompression. - ARM
+	*/
 	while (readCnt > 0) {
 		readCnt--;
 		inFile.read(reinterpret_cast<char*>(&block.messageBlock), sizeof(block.messageBlock));
@@ -312,10 +324,10 @@ int main(int argc, char* argv[]) {
 		block = hashCompression(block);
 	}
 	
-	// Handles the final padding
+	// Handles the final padding - ARM
 	block = padBlock(block, fileSize, bytesLeft);
 	
-	// Writes the hash value to the console
+	// Writes the hash value to the console - ARM
 	writeHash(block);
 	
 	endTime = clock();
