@@ -73,16 +73,6 @@ static const ull roundConst[80]{
 	0x431d67c49c100d4c, 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817
 };
 
-// Gets necessary hex bytes to create a mask
-ull getMask(size_t maskAmt) {
-	ull mask = 0;
-	for (size_t i = 0; i < maskAmt; i++) {
-		mask <<= 8;
-		mask |= 0xff;
-	}
-	return mask;
-}
-
 // Right Rotate
 ull rr(ull rotWord, int rotAmt) {
 	return _rotr64(rotWord, rotAmt);
@@ -116,9 +106,22 @@ ull rotE(ull e) {
 // Copies message block into word array, 
 // then fills the remainder of the array with the calculated value
 hashStruct fillWordArray(hashStruct block) {
-	for (int i = 0; i < 16; i++) {
-		block.w[i] = block.messageBlock[i];
-	}
+	block.w[0] = block.messageBlock[0];
+	block.w[1] = block.messageBlock[1];
+	block.w[2] = block.messageBlock[2];
+	block.w[3] = block.messageBlock[3];
+	block.w[4] = block.messageBlock[4];
+	block.w[5] = block.messageBlock[5];
+	block.w[6] = block.messageBlock[6];
+	block.w[7] = block.messageBlock[7];
+	block.w[8] = block.messageBlock[8];
+	block.w[9] = block.messageBlock[9];
+	block.w[10] = block.messageBlock[10];
+	block.w[11] = block.messageBlock[11];
+	block.w[12] = block.messageBlock[12];
+	block.w[13] = block.messageBlock[13];
+	block.w[14] = block.messageBlock[14];
+	block.w[15] = block.messageBlock[15];
 	for (int i = 16; i < 80; i++) {
 		block.w[i] = block.w[i - 16] + (rr(block.w[i - 15], 1) ^ rr(block.w[i - 15], 8) ^ rs(block.w[i - 15], 7))
 			+ block.w[i - 7] + (rr(block.w[i - 2], 19) ^ rr(block.w[i - 2], 61) ^ rs(block.w[i - 2], 6));
@@ -177,7 +180,7 @@ void writeHash(hashStruct block) {
 	cout << block.e << " ";
 	cout << block.f << " ";
 	cout << block.g << " ";
-	cout << block.h << " ";
+	cout << block.h << endl;
 }
 
 // Read remaining bytes and pad accordingly.
@@ -192,9 +195,10 @@ hashStruct padBlock(hashStruct block, ull fileSize, int bytesLeft) {
 		// Then create one final block of 0x0 and the final word being the file length
 		// Else we can just append 0x80 where the file ends, 
 		// set the last 8-byte word to file length, and fill between with 0x0
-		for (int i = 0; i < 16; i++) {
-			block.messageBlock[i] = 0x0;
-		}
+
+		// Making sure message block is set to 0 before this final read.
+		fill(&block.messageBlock[0], &block.messageBlock[16], 0);
+
 		inFile.read(reinterpret_cast<char*>(&block.messageBlock), sizeof(block.messageBlock));
 		int padStart = bytesLeft / 8;
 		int shiftAmt = (7 - (bytesLeft % 8))*8;
@@ -206,31 +210,23 @@ hashStruct padBlock(hashStruct block, ull fileSize, int bytesLeft) {
 
 		if ((128 - bytesLeft) < 17) {
 			block.messageBlock[padStart] |= (appendOne << shiftAmt);
-			for (int i = (padStart + 1); i < 16; i++) {
-				block.messageBlock[i] = 0x0;
-			}
+			fill(&block.messageBlock[padStart + 1], &block.messageBlock[16], 0);
 			block = hashCompression(block);
-
-			for (int i = 0; i < 15; i++) {
-				block.messageBlock[i] = 0x0;
-			}
+			
+			fill(&block.messageBlock[0], &block.messageBlock[15], 0);
 			block.messageBlock[15] = fileSize*8;
 			block = hashCompression(block);
 		}
 		else {
 			block.messageBlock[padStart] |= (appendOne << shiftAmt);
-			for (int i = (padStart + 1); i < 15; i++) {
-				block.messageBlock[i] = 0x0;
-			}
+			fill(&block.messageBlock[padStart + 1], &block.messageBlock[15], 0);
 			block.messageBlock[15] = fileSize*8;
 			block = hashCompression(block);
 		}
 	}
 	else {
 		block.messageBlock[0] = 0x8000000000000000;
-		for (int i = 1; i < 15; i++) {
-			block.messageBlock[i] = 0x0;
-		}
+		fill(&block.messageBlock[1], &block.messageBlock[15], 0);
 		block.messageBlock[15] = fileSize*8;
 		block = hashCompression(block);
 	}
@@ -239,7 +235,6 @@ hashStruct padBlock(hashStruct block, ull fileSize, int bytesLeft) {
 
 void prompt()
 {
-	cout << "Welcome to Aaron's SHA-512 Hash!" << endl;
 	cout << "Accepted input: SHA512 <infile>" << endl;
 }
 
@@ -255,14 +250,14 @@ int main(int argc, char* argv[]) {
 	if (argc != 2) {
 		cout << "Incorrect number of arguments supplied." << endl;
 		prompt();
-		return 1;
+		return EXIT_FAILURE;
 	}
 
 	inFile.open(argv[1], ios::in | ios::binary);
 	if (!inFile) {
-		cout << "Can't open input file " << argv[4] << endl;
+		cout << "Can't open input file " << argv[1] << endl;
 		prompt();
-		return 1;
+		return EXIT_FAILURE;
 	}
 
 	//	Determines length of file. - ARM
@@ -328,5 +323,5 @@ int main(int argc, char* argv[]) {
 	cout << fixed << setprecision(3);
 	cout << "Elapsed Time: " << secondsElapsed << endl;
 
-	return 0;
+	return EXIT_SUCCESS;
 }
